@@ -1,1283 +1,313 @@
 # Pinky — Technology Stack v1
 
-**Status:** Design specification  
-**Depends on:** `Pinky_Architecture_v1.md`, `Pinky_Domain_Model_and_State_Machines_v1.md`, `Pinky_Database_Schema_v1.md`  
-**Scope:** Phase 1 implementation technology choices  
-**Principle:** Technology supports the architecture; no framework becomes the architecture.
+**Status:** Proposed / Phase 1 baseline  
+**Scope:** Application foundation through Scheduler, with UI and supporting developer infrastructure  
+**Primary goals:** Fast startup, low idle overhead, high UI customization, local-first operation, maintainability, and clear subsystem boundaries.
 
----
-
-# 1. Stack Summary
-
-| Area | Phase 1 Choice | Role |
-|---|---|---|
-| Language | Python 3.12+ | Primary implementation language |
-| Runtime | `asyncio` | Cooperative asynchronous runtime |
-| Database | SQLite | Durable local source of truth |
-| SQLite mode | WAL | Read/write concurrency and crash-safe transactional storage |
-| SQLite access | `aiosqlite` initially | Async DB interface |
-| Validation | Pydantic v2 | Boundary/configuration validation |
-| Scheduling timers | APScheduler | Wake Scheduler/timer adapter |
-| Main scheduler | Pinky-owned implementation | Priority, fairness, admission, resources |
-| Internal transport | `asyncio.Queue` + Router | Fast in-process event delivery |
-| HTTP API | FastAPI | Future/local control interface |
-| HTTP client | httpx | External HTTP integrations |
-| Logging | Python `logging` | Runtime diagnostics |
-| Configuration | Pydantic Settings | Typed configuration |
-| Testing | pytest + pytest-asyncio | Unit/integration testing |
-| Packaging | `uv` + `pyproject.toml` | Dependency/environment management |
-| LLM runtime | Deferred | Execution subsystem concern |
-| Containers | Deferred | Not required for Phase 1 |
-
----
-
-# 2. Core Principle
-
-Pinky is a local runtime first.
-
-The desired Phase 1 deployment is:
+## 1. Final Stack
 
 ```text
-ONE MACHINE
-    ↓
-ONE PINKY PROCESS
-    ↓
-ONE ASYNC RUNTIME
-    ↓
-ONE SQLITE DATABASE
+Tauri 2
+ └── React + TypeScript UI
+       │
+       └── local API / IPC
+             │
+             ▼
+        Python Core
+        ├── asyncio
+        ├── FastAPI
+        ├── Event System
+        ├── Task System
+        └── Scheduler
+             │
+             ▼
+        SQLite + WAL
+        ├── SQLAlchemy 2
+        └── Alembic
+
+Supporting:
+  uv / Ruff / pytest / OpenTelemetry / Python logging
+
+Future / replaceable:
+  Ollama / llama.cpp / vLLM / other ModelProvider
 ```
 
-The internals are modular, but deployment remains intentionally simple.
+## 2. Core Decisions
 
-The architecture should not depend on distributed infrastructure until actual requirements justify it.
+### Desktop: Tauri 2
 
----
+Locked. Tauri uses the OS WebView rather than shipping a separate browser runtime and combines a Rust application layer with a web frontend. It supports desktop lifecycle, tray, system integration, packaging, and frontend↔Rust communication. citeturn0search6
 
-# 3. Python
-
-## Choice
+Rust should remain primarily the desktop shell:
 
 ```text
-Python 3.12+
+desktop lifecycle
+OS integration
+window management
+tray
+packaging
+secure bridge
 ```
 
-Python is appropriate because Phase 1 is primarily an orchestration and I/O workload:
+Do not move Pinky's domain logic into Rust merely because Rust is available.
+
+### Frontend: React + TypeScript
+
+Default frontend inside Tauri. Tauri does not require a specific frontend framework, so this keeps the UI highly customizable without coupling the Core to the UI framework. citeturn0search6
+
+### Core: Python + asyncio
+
+Python remains the Core language. `asyncio` is the primary concurrency model for Event Readers, timers, IPC/API work, integrations, and other I/O-heavy activity.
+
+### Local API / IPC: FastAPI
+
+FastAPI provides typed request validation and automatic OpenAPI documentation. citeturn1search0turn1search14
+
+The API is an application/domain boundary, not a database CRUD wrapper.
+
+### Validation: Pydantic
+
+Use Pydantic for API contracts, Event envelopes, Task requests, configuration, IPC messages, and other explicit data boundaries.
+
+### Database: SQLite
+
+Locked for Phase 1. Use WAL mode and foreign keys. SQLite is appropriate for Pinky's local-first, single-user, transaction-heavy architecture.
+
+### DB access: SQLAlchemy 2
+
+Use SQLAlchemy 2.x. Its SQLite dialect supports standard and asyncio interfaces; `aiosqlite` provides the asyncio interface. citeturn0search2turn0search13
+
+Keep transactions short. Never hold database transactions across LLM calls or external execution.
+
+### Migrations: Alembic
+
+Use Alembic for schema migrations. Alembic explicitly supports SQLite batch migration operations for SQLite's ALTER TABLE limitations. citeturn0search1turn0search15
+
+### Python tooling: uv + Ruff
+
+Use `uv` for Python versions, environments, dependencies, lockfiles, and project commands. It provides project management and reproducible locking in one tool. citeturn1search3turn1search12
+
+Use Ruff for linting and formatting. citeturn1search2
+
+### Testing: pytest
+
+Use pytest for unit, integration, transaction, replay, scheduler, recovery, and end-to-end tests.
+
+The highest-value early tests are:
 
 ```text
-event ingestion
-database I/O
-timers
-network I/O
-IPC
-subprocess management
-coordination
-scheduling
+Event → persistence → replay
+Event → Trigger → Occurrence
+Occurrence → SchedulerWork
+Scheduler → admission
+Resource → reservation
+Crash → recovery
 ```
 
-The architecture does not require a CPU-heavy numerical runtime.
+### Observability: OpenTelemetry + Python logging
 
-## Version policy
+Use OpenTelemetry as the vendor-neutral observability foundation. Python support includes stable traces and metrics, while logs can integrate with existing Python logging infrastructure. citeturn0search0turn0search4turn0search10
 
-Use a supported modern Python release.
+Start with structured logs and correlation identifiers; add richer tracing/metrics as runtime complexity grows.
 
-The exact minimum version should be pinned in project metadata when implementation starts.
+## 3. LLM Runtime — Deliberately Not Locked
 
-Do not target many Python versions simultaneously during Phase 1.
+Do not hard-code Pinky to one local inference runtime yet.
 
-A narrow supported range reduces dependency and testing complexity.
-
----
-
-# 4. Async Runtime: asyncio
-
-`asyncio` is the foundation of Pinky's in-process concurrency model.
-
-Conceptually:
+Define an internal interface:
 
 ```text
-Pinky Process
-      │
-      ▼
- asyncio Event Loop
-      │
- ┌────┼─────────────────────────────┐
- │    │             │               │
-Readers Router   Scheduler     Runtime Manager
- │                │
- └────────────────┴──────→ persistence
+Agent / Execution
+       ↓
+Model Router
+       ↓
+Model Provider
+       ↓
+Ollama / llama.cpp / vLLM / future provider
 ```
 
-Use `asyncio` for:
-
-- Event Readers
-- Event Router
-- Outbox publisher
-- Scheduler wake signals
-- Scheduler coordination
-- background maintenance
-- HTTP I/O
-- subprocess coordination
-
-## Important distinction
-
-Pinky's domain `Task` is not Python's `asyncio.Task`.
-
-Code should maintain clear naming boundaries.
-
-For example:
+This preserves the possibility of the previously discussed:
 
 ```text
-domain.Task
-runtime asyncio.Task
-```
-
-Do not let Python's concurrency primitive leak into the domain model.
-
----
-
-# 5. Concurrency Model
-
-Phase 1 should prefer:
-
-```text
-async I/O
+Interactive model
 +
-cooperative concurrency
+Autonomous/reasoning model
 ```
 
-over arbitrary thread/process proliferation.
+without embedding that decision into the Event/Task/Scheduler architecture.
 
-Use threads/processes only where required by:
+The actual runtime should be selected after hardware, model family, quantization, VRAM, context length, concurrency, streaming, and tool-calling requirements are known.
 
-- blocking third-party libraries
-- CPU-bound work
-- OS integration
-- model runtimes
-- native tooling
+## 4. Event Transport
 
-The Scheduler should never equate:
+Do **not** introduce Redis, Kafka, RabbitMQ, NATS, or another external broker in Phase 1.
+
+The existing design already provides:
 
 ```text
-asyncio concurrency
+Event Store
++ Outbox
++ Consumer Offsets
++ in-process routing
 ```
 
-with:
+For a local single-user application, this is sufficient and avoids unnecessary operational complexity.
+
+A broker can be introduced later behind the Event subsystem if Pinky becomes multi-process or distributed.
+
+## 5. Workflow Engine
+
+Do **not** introduce Temporal in Phase 1. Temporal provides durable workflow execution and crash-resume semantics, including long-running workflows. citeturn0search7
+
+It remains a legitimate future option if Pinky eventually needs distributed, long-running workflows. For now, Pinky's own Event → Task → Occurrence → Scheduler → Execution model should remain explicit and under our control.
+
+## 6. Process Architecture
+
+Initial deployment should stay small:
 
 ```text
-Pinky resource capacity
+Pinky Desktop
+│
+├── Tauri process
+│     └── UI WebView
+│
+└── Pinky Core process
+      ├── Event subsystem
+      ├── Task subsystem
+      ├── Scheduler
+      ├── API
+      └── SQLite
 ```
 
-They are different concepts.
+Later, model runtimes, execution workers, or sandboxes can become separate processes where isolation or resource management requires it.
 
----
+## 7. Startup Model
 
-# 6. SQLite
-
-SQLite is the durable Phase 1 database.
-
-Reasons:
+Startup should be staged:
 
 ```text
-single-machine deployment
-single Pinky process
-transactional state transitions
-durability
-low operational overhead
-local data
+A. Tauri + UI
+B. Python Core + SQLite + recovery
+C. Optional model runtime / workers / integrations
 ```
 
-SQLite should be configured with:
+Opening Pinky must not require loading an LLM.
 
-```sql
-PRAGMA journal_mode=WAL;
-PRAGMA foreign_keys=ON;
-```
-
-Additional pragmas should be chosen deliberately rather than treated as boilerplate.
-
----
-
-# 7. SQLite WAL
-
-WAL is appropriate for Pinky because the runtime will have:
+## 8. Security Boundary
 
 ```text
-continuous reads
-short transactional writes
-scheduler queries
-event ingestion
-background consumers
+UI
+ ↓
+Core API
+ ↓
+Domain authorization
+ ↓
+Execution
 ```
 
-The database remains local.
+The UI must never directly manipulate SQLite. Future tool execution must establish explicit permissions, sandboxing, and resource limits before arbitrary system actions are allowed.
 
-WAL is not a distributed coordination mechanism.
+## 9. Phase 1 Database
 
-Phase 1 therefore remains:
+Use `Pinky_Database_Schema_v2.md` as the canonical persistence specification.
 
-```text
-local SQLite
-```
-
-rather than:
+Core tables:
 
 ```text
-PostgreSQL
-+
-distributed workers
-```
+events
+outbox
+consumer_offsets
 
----
+tasks
+task_triggers
+task_dependencies
+occurrences
 
-# 8. Database Driver: aiosqlite
-
-Use:
-
-```text
-aiosqlite
-```
-
-initially.
-
-The persistence layer should expose application/domain-oriented interfaces rather than exposing raw `aiosqlite` objects throughout the codebase.
-
-Conceptually:
-
-```text
-Scheduler
-    ↓
-SchedulerStore
-    ↓
-SQLite implementation
-    ↓
-aiosqlite
-    ↓
-SQLite
-```
-
-This keeps persistence implementation replaceable.
-
----
-
-# 9. No ORM Initially
-
-Do not make an ORM the primary abstraction.
-
-Pinky's database operations contain important transactional semantics:
-
-```text
-event + outbox
-occurrence + scheduler work
-resource check + reservation + admission
-```
-
-Explicit SQL makes these operations easier to reason about.
-
-Repositories/stores should encapsulate SQL without hiding transaction boundaries from the subsystem design.
-
-An ORM can be reconsidered later if schema complexity actually justifies it.
-
----
-
-# 10. Migration Tooling
-
-Schema migrations are mandatory.
-
-The implementation should maintain ordered migrations such as:
-
-```text
-001_initial
-002_add_...
-003_...
-```
-
-A migration tool can be selected during implementation.
-
-Two reasonable options are:
-
-```text
-Alembic
-```
-
-or:
-
-```text
-small project-owned migration runner
-```
-
-The choice should be based on actual project complexity.
-
-Do not introduce Alembic solely because it is common if a very small migration layer is easier to maintain.
-
----
-
-# 11. Pydantic v2
-
-Use Pydantic for typed validation at boundaries.
-
-Good uses:
-
-```text
-external Event payloads
-configuration
-Task creation commands
-API request/response schemas
-external service data
-```
-
-Conceptually:
-
-```text
-untrusted input
-      ↓
-Pydantic validation
-      ↓
-validated command/data
-      ↓
-domain subsystem
-```
-
-Pydantic should not become the domain architecture.
-
-Not every internal object needs to be a Pydantic model.
-
----
-
-# 12. Domain Objects
-
-Keep domain objects conceptually separate from:
-
-```text
-Pydantic transport models
-SQLite rows
-HTTP request models
-```
-
-A healthy boundary is:
-
-```text
-Input Schema
-    ↓
-Domain Command / Object
-    ↓
-Repository
-    ↓
-Database Record
-```
-
-This avoids coupling the domain to a particular serialization or persistence framework.
-
----
-
-# 13. APScheduler
-
-Use APScheduler only for the **Wake Scheduler** role.
-
-```text
-                 PINKY
-                   │
-        ┌──────────┴──────────┐
-        │                     │
- Wake Scheduler          Run Scheduler
-        │                     │
- APScheduler             Pinky code
-        │                     │
-        └──────────┬──────────┘
-                   ▼
-              Dispatcher
-```
-
-APScheduler may manage:
-
-```text
-one-shot timers
-intervals
-cron-like schedules
-wakeups
-retry timing
-deadline-related wakeups
-```
-
-The final feature set should be limited to what Pinky actually uses.
-
----
-
-# 14. APScheduler Is Not the Source of Truth
-
-APScheduler must not own:
-
-```text
-Task lifecycle
-Occurrence lifecycle
-priority
-aging
+scheduler_work
 resources
 reservations
-admission
-fairness
-Pinky scheduler state
+scheduler_decisions
 ```
 
-Instead:
+## 10. What We Are Not Adding Yet
 
 ```text
-Pinky persistent state
-        ↓
-timer registration
-        ↓
-APScheduler
-        ↓
-wake callback
-        ↓
-Pinky re-evaluates state
-```
-
-If APScheduler loses an in-memory timer, Pinky must be capable of rebuilding it from durable state.
-
-This is one of the most important technology boundaries.
-
----
-
-# 15. Main Scheduler
-
-The Run Scheduler is custom Pinky code.
-
-No general-purpose task queue should replace it.
-
-Its responsibilities include:
-
-```text
-eligibility consumption
-priority calculation
-bounded aging
-deadline pressure
-queue management
-concurrency limits
-resource admission
-reservation
-backpressure
-simple backfill
-dispatch decision
-recovery
-```
-
-This is core Pinky logic.
-
----
-
-# 16. Internal Event Transport
-
-Use:
-
-```text
-asyncio.Queue
-```
-
-and a Pinky-owned routing layer.
-
-Conceptually:
-
-```text
-SQLite / Outbox
-       ↓
-Publisher
-       ↓
-asyncio transport
-       ↓
-EventRouter
-       ├── Trigger Engine
-       ├── Scheduler
-       ├── internal consumers
-       └── future components
-```
-
-The queue is not durable.
-
-If the process crashes:
-
-```text
-in-memory queue state disappears
-```
-
-Durable state remains in SQLite and must be replayable.
-
----
-
-# 17. Why No External Message Broker
-
-Do not add:
-
-```text
-Kafka
-RabbitMQ
-Redis Streams
-NATS
-```
-
-during Phase 1.
-
-They solve problems Pinky does not yet have:
-
-```text
-multiple machines
-large distributed throughput
-independent broker scaling
-cross-process distributed delivery
-```
-
-Pinky instead needs:
-
-```text
-correct persistence
-clear transactions
-replay
-simple local operation
-```
-
-SQLite + in-process transport is sufficient for the intended Phase 1 deployment.
-
----
-
-# 18. FastAPI
-
-FastAPI is a good candidate for Pinky's local/API boundary.
-
-Potential future interfaces:
-
-```text
-CLI
-Web UI
-local application
-remote/local API client
-voice interface
-```
-
-Conceptually:
-
-```text
-             Pinky Core
-                 │
-          Command / Query API
-                 │
-       ┌─────────┼─────────┐
-       ↓         ↓         ↓
-      CLI     FastAPI    future UI
-```
-
-FastAPI should not be required for the core runtime to function.
-
-Pinky should be able to start its core subsystems without depending on an HTTP server.
-
----
-
-# 19. HTTP Client: httpx
-
-Use `httpx` for external HTTP integrations.
-
-Potential uses:
-
-```text
-webhooks
-external APIs
-cloud/local services
-future integrations
-```
-
-Keep external network I/O behind integration modules.
-
-Do not allow arbitrary HTTP calls to become part of the domain layer.
-
----
-
-# 20. Logging
-
-Use Python's standard:
-
-```text
-logging
-```
-
-initially.
-
-Logs should carry contextual identifiers where applicable:
-
-```text
-event_id
-task_id
-occurrence_id
-scheduler_work_id
-reservation_id
-correlation_id
-```
-
-The objective is to answer:
-
-> Why did Pinky make this decision?
-
-without requiring a debugger.
-
-Structured logging can be introduced without changing the domain architecture.
-
----
-
-# 21. Configuration
-
-Use typed configuration through:
-
-```text
-Pydantic Settings
-```
-
-The configuration hierarchy should conceptually be:
-
-```text
-defaults
-    ↓
-configuration file
-    ↓
-environment
-    ↓
-runtime/task policy
-```
-
-Task-level settings should not require modifying global configuration.
-
-Examples:
-
-```yaml
-scheduler:
-  max_concurrency: 4
-
-resources:
-  strong_llm:
-    capacity: 1
-```
-
-The exact configuration file format can be selected during implementation.
-
----
-
-# 22. Testing
-
-Use:
-
-```text
-pytest
-pytest-asyncio
-```
-
-Testing priorities:
-
-## Domain tests
-
-State transitions and invariants.
-
-## Persistence tests
-
-Transactions, foreign keys, migrations, recovery.
-
-## Event tests
-
-Persistence, outbox, replay, deduplication.
-
-## Scheduler tests
-
-Priority, aging, resources, concurrency, deadlines.
-
-## Recovery tests
-
-Crash-equivalent states and reconciliation.
-
-## Integration tests
-
-End-to-end:
-
-```text
-Event
- ↓
-Task
- ↓
-Occurrence
- ↓
-Scheduler
- ↓
-Admission
- ↓
-Dispatch intent
-```
-
-Execution can be represented by a mock dispatcher.
-
----
-
-# 23. Scheduler Testing Requirements
-
-The Scheduler must have deterministic tests for cases such as:
-
-```text
-A higher-priority task arrives.
-
-A low-priority task has waited for a long time.
-
-A required resource is unavailable.
-
-A resource becomes available.
-
-Task concurrency limit is reached.
-
-A deadline approaches.
-
-A deadline expires.
-
-Multiple resources are required.
-
-A high-priority item is blocked but another item is runnable.
-
-Pinky crashes after reservation.
-
-Pinky crashes before admission.
-
-Two scheduler decisions attempt the same capacity concurrently.
-```
-
-These tests are more valuable than superficial line coverage.
-
----
-
-# 24. Packaging: uv
-
-Use:
-
-```text
-uv
-```
-
-with:
-
-```text
-pyproject.toml
-uv.lock
-```
-
-The lockfile should be committed.
-
-Development environments should be reproducible.
-
-Dependencies should be deliberately added rather than installing large framework bundles.
-
----
-
-# 25. Suggested Dependency Groups
-
-Conceptually:
-
-```text
-runtime
-    pydantic
-    pydantic-settings
-    aiosqlite
-    apscheduler
-
-interface
-    fastapi
-    uvicorn
-    httpx
-
-development
-    pytest
-    pytest-asyncio
-```
-
-The exact dependency list will be finalized when implementation begins.
-
----
-
-# 26. LLM Technology
-
-LLMs are deliberately **not a Phase 1 core dependency**.
-
-Pinky should be able to boot and demonstrate:
-
-```text
-Event
-→ Task
-→ Occurrence
-→ Scheduler
-→ Admission
-→ Dispatch
-```
-
-without loading an LLM.
-
-This is important because:
-
-```text
-LLM
-```
-
-is a future execution resource, not Pinky's runtime.
-
----
-
-# 27. Future LLM Boundary
-
-The eventual architecture should look approximately like:
-
-```text
-                    Scheduler
-                        │
-                     Dispatch
-                        │
-                    Execution
-                        │
-             ┌──────────┼──────────┐
-             │          │          │
-          small LLM  strong LLM   tools
-```
-
-The Scheduler should not know how inference works.
-
-It should only understand resource requirements such as:
-
-```text
-small_llm
-strong_llm
-gpu
-```
-
-The Execution subsystem resolves those resources into actual runtime implementations.
-
----
-
-# 28. LLM Framework Policy
-
-Do not make Pinky dependent on:
-
-```text
-LangChain
-LlamaIndex
-AutoGen
-CrewAI
-```
-
-as architectural foundations.
-
-They may eventually be evaluated as optional libraries inside an Execution/agent subsystem if a concrete capability requires them.
-
-The core runtime must remain independent.
-
----
-
-# 29. Containers
-
-Do not require Docker for Phase 1.
-
-Local development should work directly with:
-
-```text
-Python
-uv
-SQLite
-```
-
-Containers may become useful later for:
-
-- isolated execution workers
-- model services
-- reproducible deployment
-- external integrations
-- sandboxing
-
-But none is required to validate the current architecture.
-
----
-
-# 30. Operating-System Integration
-
-OS-specific functionality should be isolated behind readers/adapters.
-
-Examples:
-
-```text
-filesystem watcher
-process monitor
-system events
-device events
-```
-
-The Event subsystem should consume canonical Events rather than directly depending on OS-specific APIs.
-
-Conceptually:
-
-```text
-OS API
-   ↓
-Reader Adapter
-   ↓
-Canonical Event
-   ↓
-Pinky
-```
-
----
-
-# 31. Dependency Policy
-
-A dependency should be introduced when it provides meaningful functionality that is better maintained externally than internally.
-
-Prefer:
-
-```text
-small dependency
-clear boundary
-replaceable implementation
-```
-
-Avoid:
-
-```text
-framework dependency
-deep coupling
-large transitive dependency graph
-```
-
-The question for every dependency should be:
-
-> What part of Pinky's architecture does this dependency implement, and can we replace it without changing the domain model?
-
----
-
-# 32. Technologies Explicitly Deferred
-
-No Phase 1 dependency on:
-
-```text
-PostgreSQL
 Redis
 Kafka
 RabbitMQ
 NATS
-Celery
+Temporal
+PostgreSQL
+MongoDB
 Kubernetes
 Docker
-distributed locks
-distributed task queues
-vector databases
-LLM orchestration frameworks
-cloud model APIs
+microservices
+GraphQL
+gRPC
+cloud observability stacks
 ```
 
-They can be evaluated later if requirements emerge.
+These may become useful later, but none solves a Phase 1 requirement strongly enough to justify the added complexity.
 
----
+## 11. Industry Alignment
 
-# 33. Technology-to-Architecture Mapping
+The stack follows widely used patterns without importing distributed-system infrastructure unnecessarily:
 
 ```text
-ARCHITECTURE              TECHNOLOGY
-
-Pinky runtime             Python + asyncio
-
-Durable state             SQLite + WAL
-
-Async database access     aiosqlite
-
-Data validation           Pydantic
-
-Configuration             Pydantic Settings
-
-Event transport           asyncio.Queue
-
-Event routing             Pinky-owned Router
-
-Wake scheduling           APScheduler
-
-Run scheduling            Pinky-owned Scheduler
-
-HTTP API                  FastAPI
-
-HTTP integration          httpx
-
-Testing                   pytest + pytest-asyncio
-
-Packaging                 uv
-
-Logging                   Python logging
-
-LLM execution             Deferred
+Desktop       Tauri / Rust / WebView
+Frontend      React / TypeScript
+Backend       Python
+API           FastAPI
+Validation    Pydantic
+Persistence   SQLite / SQLAlchemy
+Migrations    Alembic
+Async         asyncio
+Tooling       uv / Ruff
+Testing       pytest
+Observability OpenTelemetry
 ```
 
----
+The important principle is that "industry standard" does not mean "use the largest infrastructure available." For a local agent, minimizing unnecessary infrastructure is itself a useful architectural property.
 
-# 34. Technology Boundaries
-
-The following dependencies should remain behind interfaces:
+## 12. Phase 1 Development Order
 
 ```text
-SQLite
-    → Persistence interfaces
-
-APScheduler
-    → Wake Scheduler interface
-
-FastAPI
-    → API interface
-
-httpx
-    → External integration interfaces
-
-Pydantic
-    → Boundary validation
-
-LLM runtime
-    → Execution resource interface
+1. Repository structure
+2. Python environment / uv
+3. Tauri application shell
+4. React + TypeScript frontend
+5. Core process
+6. FastAPI local API
+7. SQLite initialization
+8. SQLAlchemy models
+9. Alembic migrations
+10. Event Store
+11. Outbox
+12. Consumer offsets
+13. Event Intake
+14. Event Router
+15. Tasks
+16. Triggers
+17. Occurrences
+18. SchedulerWork
+19. Resources
+20. Reservations
+21. Scheduler
+22. Scheduler recovery
+23. UI ↔ Core integration
+24. Phase 1 integration tests
 ```
 
-The domain should not import framework-specific types unnecessarily.
+## 13. Final Decision
 
----
+**Pinky Phase 1:**
 
-# 35. Proposed Project Shape
+> **Tauri 2 + React + TypeScript for the desktop application, Python + asyncio + FastAPI for the Core runtime, SQLite + SQLAlchemy + Alembic for persistence, and uv + Ruff + pytest + OpenTelemetry for engineering infrastructure.**
 
-A starting structure could be:
+The LLM runtime remains replaceable.
 
-```text
-pinky/
-├── pyproject.toml
-├── uv.lock
-├── README.md
-│
-├── src/
-│   └── pinky/
-│       ├── core/
-│       ├── domain/
-│       ├── events/
-│       ├── tasks/
-│       ├── scheduler/
-│       ├── persistence/
-│       ├── runtime/
-│       └── interfaces/
-│
-├── migrations/
-│
-└── tests/
-    ├── unit/
-    ├── integration/
-    └── recovery/
-```
+The resulting stack is intentionally small, local-first, fast to start, highly customizable at the UI layer, and capable of growing into the later agent/execution architecture without prematurely introducing distributed infrastructure.
 
-This is an initial implementation shape, not a final requirement.
+## 14. Boundary of This Document
 
-Package boundaries should follow subsystem ownership.
-
----
-
-# 36. Startup Model
-
-The runtime should eventually start approximately as:
-
-```text
-main()
-  ↓
-load configuration
-  ↓
-initialize logging
-  ↓
-initialize database
-  ↓
-run migrations
-  ↓
-recover persistent state
-  ↓
-initialize Event Router
-  ↓
-initialize Readers
-  ↓
-initialize Wake Scheduler
-  ↓
-initialize Run Scheduler
-  ↓
-start runtime supervision
-  ↓
-Pinky operational
-```
-
-Startup ordering matters because recovery must occur before normal scheduling resumes.
-
----
-
-# 37. Shutdown Model
-
-Shutdown should be graceful:
-
-```text
-shutdown signal
-      ↓
-stop accepting new external work
-      ↓
-stop readers
-      ↓
-stop wake generation
-      ↓
-allow/coordinate scheduler shutdown
-      ↓
-flush required durable state
-      ↓
-release/reconcile runtime-owned resources
-      ↓
-close database
-      ↓
-exit
-```
-
-Execution-specific shutdown semantics will be added later.
-
----
-
-# 38. Phase 1 Technology Acceptance Criteria
-
-The stack is considered validated when Pinky can:
-
-```text
-1. Start with one local process.
-
-2. Initialize SQLite reliably.
-
-3. Apply migrations.
-
-4. Persist Events transactionally.
-
-5. Persist Outbox entries with Events.
-
-6. Recover pending Outbox work after restart.
-
-7. Create Tasks and Occurrences.
-
-8. Run Scheduler decisions asynchronously.
-
-9. Atomically reserve resources.
-
-10. Recover stale Scheduler state.
-
-11. Restore wake timers from durable state.
-
-12. Run without an LLM.
-
-13. Run tests deterministically.
-
-14. Run entirely on a local machine without external infrastructure.
-```
-
----
-
-# 39. Final Technology Principle
-
-The stack should preserve this hierarchy:
-
-```text
-                  PINKY DOMAIN
-                       │
-        ┌──────────────┼──────────────┐
-        │              │              │
-      Events        Tasks         Scheduler
-        │              │              │
-        └──────────────┼──────────────┘
-                       │
-                  Interfaces
-                       │
-        ┌──────────────┼──────────────┐
-        │              │              │
-     SQLite        APScheduler     asyncio
-        │              │              │
-        └──────────────┼──────────────┘
-                       │
-                  Infrastructure
-```
-
-Frameworks and libraries are implementation choices.
-
-The domain model, state machines, invariants, and subsystem contracts remain Pinky's architectural authority.
-
----
-
-# 40. Decision Summary
-
-| Decision | Status |
-|---|---|
-| Python | Fixed |
-| asyncio | Fixed |
-| SQLite | Fixed |
-| SQLite WAL | Fixed |
-| aiosqlite initially | Fixed |
-| ORM-first design | Rejected for Phase 1 |
-| Pydantic | Fixed |
-| APScheduler for Wake Scheduler | Fixed |
-| Pinky-owned Run Scheduler | Fixed |
-| asyncio.Queue for in-process transport | Fixed |
-| FastAPI | Selected for future API boundary |
-| httpx | Selected for external HTTP boundary |
-| pytest + pytest-asyncio | Fixed |
-| uv | Selected |
-| Standard logging initially | Fixed |
-| LLM runtime | Deferred |
-| LLM orchestration framework | Deferred |
-| Redis/Kafka/RabbitMQ/NATS | Deferred |
-| Celery | Excluded from Phase 1 |
-| Docker | Deferred |
-| Kubernetes | Deferred |
-| PostgreSQL | Deferred |
-
----
-
-# 41. Next Step
-
-With:
-
-```text
-Pinky_Architecture_v1.md
-Pinky_Domain_Model_and_State_Machines_v1.md
-Pinky_Database_Schema_v1.md
-Pinky_Tech_Stack_v1.md
-```
-
-the design foundation is complete enough to begin implementation planning.
-
-The next artifact should be an **Implementation Specification / Phase 1 Build Plan**, covering:
-
-```text
-repository structure
-      ↓
-database initialization
-      ↓
-domain types
-      ↓
-repositories
-      ↓
-Event Intake
-      ↓
-Event Store + Outbox
-      ↓
-Router
-      ↓
-Task/Occurrence
-      ↓
-Eligibility
-      ↓
-Wake Scheduler
-      ↓
-Run Scheduler
-      ↓
-Resource Admission
-      ↓
-Recovery
-      ↓
-Mock Dispatcher
-      ↓
-integration tests
-```
-
-The first implementation milestone remains:
-
-**Event → Task → Occurrence → Scheduler → Admission → Dispatch Intent**
-
-with no real Execution subsystem yet.
+This document defines technology choices. It does not redefine the domain model, Event taxonomy, Task semantics, Scheduler semantics, database schema, Execution architecture, or LLM reasoning architecture. Those remain defined by their respective design documents.
