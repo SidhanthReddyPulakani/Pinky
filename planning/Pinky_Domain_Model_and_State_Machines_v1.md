@@ -683,7 +683,7 @@ Recommended conceptual states:
 ```text
 WAITING
 READY
-QUEUED
+
 ADMITTED
 DISPATCHED
 ```
@@ -704,7 +704,7 @@ Examples:
 
 The Occurrence is eligible and runnable.
 
-### QUEUED
+### 
 
 The Scheduler has accepted the work into its active scheduling set.
 
@@ -720,14 +720,14 @@ Execution then owns the execution lifecycle.
 
 ## 7.4 Important distinction
 
-`QUEUED` and `ADMITTED` must not be collapsed.
+`` and `ADMITTED` must not be collapsed.
 
 Example:
 
 ```text
 READY
   ↓
-QUEUED
+
   ↓
 ADMITTED
 ```
@@ -1156,7 +1156,7 @@ EXPIRED
 ```text
 WAITING
 READY
-QUEUED
+
 ADMITTED
 DISPATCHED
 ```
@@ -1774,7 +1774,7 @@ PENDING → ACTIVATED
 
 SCHEDULER WORK
 ────────────────────────────────────────
-WAITING → READY → QUEUED → ADMITTED → DISPATCHED
+WAITING → READY →  → ADMITTED → DISPATCHED
 
 
 RESERVATION
