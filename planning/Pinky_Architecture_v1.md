@@ -115,9 +115,15 @@ Initial deployment:
 
 -   one machine
 -   one user
--   one Pinky process
+-   one Tauri desktop process + one Pinky Core process
 -   SQLite
 -   asyncio
+
+Phase 1 remains single-user and single-machine.
+
+The Tauri desktop shell and Pinky Core are separate OS processes, but there is exactly one Pinky Core runtime process in Phase 1.
+
+The Core owns the Event, Task, Occurrence, Scheduler, Admission, and persistence subsystems.
 
 Interfaces should nevertheless avoid unnecessary assumptions that
 prevent future worker processes.
@@ -490,10 +496,26 @@ Schedulable Work
     │
     ├── WAITING
     ├── READY
-    ├── QUEUED
     ├── ADMITTED
     └── DISPATCHED
 ```
+
+### Scheduler State Persistence
+
+Phase 1 does not persist `QUEUED` as an authoritative SchedulerWork state.
+
+`READY` represents work that is eligible for scheduling but has not yet been admitted.
+
+The Scheduler may maintain an in-memory candidate queue or priority structure for dispatch decisions. Such queue membership is runtime state and is not itself the durable lifecycle state of SchedulerWork.
+
+The durable SchedulerWork lifecycle is:
+
+WAITING → READY → ADMITTED → DISPATCHED
+
+with terminal or exceptional transitions such as:
+
+CANCELLED
+EXPIRED
 
 These are not Task lifecycle states.
 

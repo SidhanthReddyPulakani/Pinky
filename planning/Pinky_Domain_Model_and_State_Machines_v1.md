@@ -174,15 +174,13 @@ correlation_id
 schema_version
 ```
 
-Potential future metadata may include:
+### Event Source and Deduplication Metadata
+
+The Event model includes durable source-level identifiers used by Event Intake and Event Store for deduplication.
 
 ```text
 source_event_id
-deduplication_key
-trace_id
-```
-
-These should not be added unless a concrete requirement exists.
+dedupe_key
 
 ## 4.3 Event identity
 
