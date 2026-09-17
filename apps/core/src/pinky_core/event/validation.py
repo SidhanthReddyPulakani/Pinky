@@ -27,8 +27,6 @@ class Event(BaseModel):
     @classmethod
     def validate_timezone(cls, value: datetime) -> datetime:
         if value.tzinfo is None or value.utcoffset() is None:
-            raise ValueError(
-                "Event timestamps must be timezone-aware"
-            )
+            raise ValueError("Event timestamps must be timezone-aware")
 
         return value.astimezone(UTC)

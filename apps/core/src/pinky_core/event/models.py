@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -22,14 +22,14 @@ class IncomingEvent(BaseModel):
     correlation_id: str | None = None
 
     schema_version: int = 1
-    
+
     @field_validator("occurred_at")
     @classmethod
     def validate_timezone(cls, value: datetime) -> datetime:
         if value.tzinfo is None or value.utcoffset() is None:
             raise ValueError("Event timestamps must be timezone-aware")
 
-        return value.astimezone(timezone.utc)
+        return value.astimezone(UTC)
 
 
 class Event(BaseModel):
@@ -60,8 +60,8 @@ class Event(BaseModel):
         if value.tzinfo is None or value.utcoffset() is None:
             raise ValueError("Event timestamps must be timezone-aware")
 
-        return value.astimezone(timezone.utc)
-    
+        return value.astimezone(UTC)
+
     @classmethod
     def from_incoming(
         cls,

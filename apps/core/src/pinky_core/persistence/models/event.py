@@ -1,6 +1,4 @@
-from datetime import datetime
-
-from sqlalchemy import Integer, String, Text
+from sqlalchemy import Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from . import Base
@@ -22,20 +20,22 @@ class EventORM(Base):
     )
 
     event_type: Mapped[str] = mapped_column(
-        String,
+        Text,
         nullable=False,
     )
 
     source: Mapped[str] = mapped_column(
-        String,
+        Text,
         nullable=False,
     )
 
-    occurred_at: Mapped[datetime] = mapped_column(
+    occurred_at: Mapped[str] = mapped_column(
+        Text,
         nullable=False,
     )
 
-    received_at: Mapped[datetime] = mapped_column(
+    received_at: Mapped[str] = mapped_column(
+        Text,
         nullable=False,
     )
 
@@ -43,7 +43,6 @@ class EventORM(Base):
         Text,
         nullable=False,
     )
-
     event_metadata: Mapped[str] = mapped_column(
         "metadata",
         Text,
@@ -51,22 +50,22 @@ class EventORM(Base):
         default="{}",
     )
     causation_id: Mapped[str | None] = mapped_column(
-        String,
+        Text,
         nullable=True,
     )
 
     correlation_id: Mapped[str | None] = mapped_column(
-        String,
+        Text,
         nullable=True,
     )
 
     source_event_id: Mapped[str | None] = mapped_column(
-        String,
+        Text,
         nullable=True,
     )
 
     dedupe_key: Mapped[str | None] = mapped_column(
-        String,
+        Text,
         nullable=True,
     )
 
@@ -74,3 +73,20 @@ class EventORM(Base):
         Integer,
         nullable=False,
     )
+
+
+Index(
+    "uq_events_source_event",
+    EventORM.source,
+    EventORM.source_event_id,
+    unique=True,
+    sqlite_where=EventORM.source_event_id.is_not(None),
+)
+
+Index(
+    "uq_events_source_dedupe",
+    EventORM.source,
+    EventORM.dedupe_key,
+    unique=True,
+    sqlite_where=EventORM.dedupe_key.is_not(None),
+)
