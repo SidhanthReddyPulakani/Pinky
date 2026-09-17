@@ -44,12 +44,12 @@ class EventORM(Base):
         nullable=False,
     )
 
-    metadata: Mapped[str] = mapped_column(
+    event_metadata: Mapped[str] = mapped_column(
+        "metadata",
         Text,
         nullable=False,
         default="{}",
     )
-
     causation_id: Mapped[str | None] = mapped_column(
         String,
         nullable=True,
