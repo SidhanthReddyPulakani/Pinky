@@ -16,6 +16,7 @@ class OutboxRepository:
 
     async def create_for_event(
         self,
+        session: AsyncSession,
         event_id: UUID,
     ) -> None:
         row = OutboxORM(
@@ -25,9 +26,7 @@ class OutboxRepository:
             status="PENDING",
         )
 
-        async with self._session_factory() as session:
-            async with session.begin():
-                session.add(row)
+        session.add(row)
 
     async def get_pending(
         self,

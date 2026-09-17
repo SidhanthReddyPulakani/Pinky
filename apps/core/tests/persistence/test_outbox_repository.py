@@ -3,17 +3,18 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import select
 
 from pinky_core.event.models import Event
 from pinky_core.persistence.database import (
     create_engine,
     create_session_factory,
 )
+from pinky_core.persistence.event_repository import SQLiteEventRepository
 from pinky_core.persistence.models import Base
+from pinky_core.persistence.models.outbox import OutboxORM
 from pinky_core.persistence.outbox_repository import OutboxRepository
-from pinky_core.persistence.event_repository import (
-        SQLiteEventRepository,
-)
+
 
 def make_event() -> Event:
     return Event(
@@ -43,47 +44,55 @@ def make_event() -> Event:
 
 
 @pytest.fixture
-async def repository(tmp_path: Path):
+async def session_factory(tmp_path: Path):
     database_path = tmp_path / "test.db"
 
     engine = create_engine(database_path)
-    session_factory = create_session_factory(engine)
+    factory = create_session_factory(engine)
 
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
 
-    repository = OutboxRepository(session_factory)
-
-    yield repository
+    yield factory
 
     await engine.dispose()
 
 
 @pytest.fixture
-async def event_repository(tmp_path: Path):
-    database_path = tmp_path / "test.db"
-
-    engine = create_engine(database_path)
-    session_factory = create_session_factory(engine)
-
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
+async def repositories(session_factory):
+    return (
+        OutboxRepository(session_factory),
+        SQLiteEventRepository(session_factory),
+    )
 
 
-
-    repository = SQLiteEventRepository(session_factory)
-
-    yield repository
-
-    await engine.dispose()
+async def create_outbox_for_event(
+    outbox_repository: OutboxRepository,
+    session_factory,
+    event_id,
+) -> None:
+    async with session_factory() as session:
+        async with session.begin():
+            await outbox_repository.create_for_event(
+                session,
+                event_id,
+            )
 
 
 @pytest.mark.asyncio
-async def test_create_for_event(repository, event_repository):
+async def test_create_for_event(
+    session_factory,
+    repositories,
+):
+    repository, event_repository = repositories
     event = make_event()
 
     await event_repository.append(event)
-    await repository.create_for_event(event.event_id)
+    await create_outbox_for_event(
+        repository,
+        session_factory,
+        event.event_id,
+    )
 
     rows = await repository.get_pending()
 
@@ -95,17 +104,27 @@ async def test_create_for_event(repository, event_repository):
 
 @pytest.mark.asyncio
 async def test_create_for_event_generates_unique_outbox_id(
-    repository,
-    event_repository,
+    session_factory,
+    repositories,
 ):
+    repository, event_repository = repositories
+
     first_event = make_event()
     second_event = make_event()
 
     await event_repository.append(first_event)
     await event_repository.append(second_event)
 
-    await repository.create_for_event(first_event.event_id)
-    await repository.create_for_event(second_event.event_id)
+    await create_outbox_for_event(
+        repository,
+        session_factory,
+        first_event.event_id,
+    )
+    await create_outbox_for_event(
+        repository,
+        session_factory,
+        second_event.event_id,
+    )
 
     rows = await repository.get_pending()
 
@@ -115,13 +134,18 @@ async def test_create_for_event_generates_unique_outbox_id(
 
 @pytest.mark.asyncio
 async def test_get_pending_returns_only_pending_rows(
-    repository,
-    event_repository,
+    session_factory,
+    repositories,
 ):
+    repository, event_repository = repositories
     event = make_event()
 
     await event_repository.append(event)
-    await repository.create_for_event(event.event_id)
+    await create_outbox_for_event(
+        repository,
+        session_factory,
+        event.event_id,
+    )
 
     rows = await repository.get_pending()
 
@@ -131,14 +155,19 @@ async def test_get_pending_returns_only_pending_rows(
 
 @pytest.mark.asyncio
 async def test_get_pending_respects_limit(
-    repository,
-    event_repository,
+    session_factory,
+    repositories,
 ):
+    repository, event_repository = repositories
     events = [make_event() for _ in range(3)]
 
     for event in events:
         await event_repository.append(event)
-        await repository.create_for_event(event.event_id)
+        await create_outbox_for_event(
+            repository,
+            session_factory,
+            event.event_id,
+        )
 
     rows = await repository.get_pending(limit=2)
 
@@ -146,10 +175,44 @@ async def test_get_pending_respects_limit(
 
 
 @pytest.mark.asyncio
-async def test_outbox_requires_existing_event(
-    repository,
+async def test_create_for_event_requires_existing_event(
+    session_factory,
 ):
+    repository = OutboxRepository(session_factory)
     missing_event_id = uuid4()
 
     with pytest.raises(Exception):
-        await repository.create_for_event(missing_event_id)
+        async with session_factory() as session:
+            async with session.begin():
+                await repository.create_for_event(
+                    session,
+                    missing_event_id,
+                )
+
+
+@pytest.mark.asyncio
+async def test_outbox_has_foreign_key_to_event(
+    session_factory,
+):
+    event = make_event()
+    event_repository = SQLiteEventRepository(session_factory)
+    repository = OutboxRepository(session_factory)
+
+    await event_repository.append(event)
+
+    await create_outbox_for_event(
+        repository,
+        session_factory,
+        event.event_id,
+    )
+
+    async with session_factory() as session:
+        result = await session.execute(
+            select(OutboxORM).where(
+                OutboxORM.event_id == str(event.event_id)
+            )
+        )
+
+        row = result.scalar_one()
+
+    assert row.event_id == str(event.event_id)
