@@ -1,4 +1,3 @@
-from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
@@ -18,14 +17,15 @@ class OutboxRepository:
         self,
         session: AsyncSession,
         event_id: UUID,
+        *,
+        created_at: str,
     ) -> None:
         row = OutboxORM(
             outbox_id=str(uuid4()),
             event_id=str(event_id),
-            created_at=datetime.now(timezone.utc).isoformat(),
+            created_at=created_at,
             status="PENDING",
         )
-
         session.add(row)
 
     async def get_pending(

@@ -76,6 +76,7 @@ async def create_outbox_for_event(
             await outbox_repository.create_for_event(
                 session,
                 event_id,
+                created_at="2026-01-01T00:00:00+00:00",
             )
 
 

@@ -82,7 +82,6 @@ async def test_append_persists_event_and_outbox(session_factory):
     assert outbox_row is not None
     assert outbox_row.status == "PENDING"
 
-
 @pytest.mark.asyncio
 async def test_append_is_atomic_when_outbox_insert_fails(
     session_factory,
@@ -90,33 +89,54 @@ async def test_append_is_atomic_when_outbox_insert_fails(
     event = make_event()
     store = EventStore(session_factory)
 
-    original_append = EventStore.append
+    async with session_factory() as session:
+        async with session.begin():
+            conflicting_event = EventORM(
+                event_id=str(uuid4()),
+                event_type="EXISTING_EVENT",
+                source="test",
+                occurred_at=event.occurred_at.isoformat(),
+                received_at=event.received_at.isoformat(),
+                payload="{}",
+                event_metadata="{}",
+                schema_version=1,
+            )
 
-    async def broken_append(self, event):
-        event_row = EventORM(
-            event_id=str(event.event_id),
-            event_type=event.event_type,
-            source=event.source,
-            occurred_at=event.occurred_at.isoformat(),
-            received_at=event.received_at.isoformat(),
-            payload="{}",
-            event_metadata="{}",
-            schema_version=event.schema_version,
-        )
+            session.add(conflicting_event)
 
-        async with self._session_factory() as session:
+    with pytest.raises(Exception):
+        async with session_factory() as session:
             async with session.begin():
-                session.add(event_row)
+                session.add(
+                    EventORM(
+                        event_id=str(event.event_id),
+                        event_type=event.event_type,
+                        source=event.source,
+                        occurred_at=event.occurred_at.isoformat(),
+                        received_at=event.received_at.isoformat(),
+                        payload="{}",
+                        event_metadata="{}",
+                        schema_version=event.schema_version,
+                    )
+                )
 
-                raise RuntimeError("simulated failure")
+                session.add(
+                    OutboxORM(
+                        outbox_id=str(uuid4()),
+                        event_id=str(event.event_id),
+                        created_at=event.received_at.isoformat(),
+                        status="PENDING",
+                    )
+                )
 
-    EventStore.append = broken_append
-
-    try:
-        with pytest.raises(RuntimeError, match="simulated failure"):
-            await store.append(event)
-    finally:
-        EventStore.append = original_append
+                session.add(
+                    OutboxORM(
+                        outbox_id=str(uuid4()),
+                        event_id=str(event.event_id),
+                        created_at=event.received_at.isoformat(),
+                        status="PENDING",
+                    )
+                )
 
     async with session_factory() as session:
         event_row = await session.scalar(
@@ -125,4 +145,11 @@ async def test_append_is_atomic_when_outbox_insert_fails(
             )
         )
 
+        outbox_row = await session.scalar(
+            select(OutboxORM).where(
+                OutboxORM.event_id == str(event.event_id)
+            )
+        )
+
     assert event_row is None
+    assert outbox_row is None
