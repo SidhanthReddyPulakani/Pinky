@@ -1,6 +1,4 @@
-from datetime import datetime
-
-from sqlalchemy import ForeignKey, Integer, String, Text
+from sqlalchemy import CheckConstraint, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from . import Base
@@ -8,6 +6,17 @@ from . import Base
 
 class OutboxORM(Base):
     __tablename__ = "outbox"
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('PENDING', 'PUBLISHED')",
+            name="ck_outbox_status",
+        ),
+        CheckConstraint(
+            "attempt_count >= 0",
+            name="ck_outbox_attempt_count",
+        ),
+    )
 
     outbox_id: Mapped[str] = mapped_column(
         String(36),
