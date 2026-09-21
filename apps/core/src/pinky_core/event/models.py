@@ -16,7 +16,7 @@ class IncomingEvent(BaseModel):
 
     occurred_at: datetime
     payload: dict[str, Any]
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    event_metadata: dict[str, Any] = Field(default_factory=dict)
 
     causation_id: str | None = None
     correlation_id: str | None = None
@@ -44,7 +44,7 @@ class Event(BaseModel):
     received_at: datetime
 
     payload: dict[str, Any]
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    event_metadata: dict[str, Any] = Field(default_factory=dict)
 
     causation_id: str | None = None
     correlation_id: str | None = None
@@ -75,7 +75,7 @@ class Event(BaseModel):
             occurred_at=incoming.occurred_at,
             received_at=received_at,
             payload=incoming.payload,
-            metadata=incoming.metadata,
+            event_metadata=incoming.event_metadata,
             causation_id=incoming.causation_id,
             correlation_id=incoming.correlation_id,
             source_event_id=incoming.source_event_id,

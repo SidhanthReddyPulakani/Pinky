@@ -1,32 +1,33 @@
-from datetime import UTC, datetime
-from typing import Any
-from uuid import UUID, uuid4
-
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pinky_core.event.models import Event
 
 
-class Event(BaseModel):
-    model_config = ConfigDict(frozen=True)
+class EventValidation:
+    def validate(self, event: Event) -> Event:
+        self._validate_event_type(event)
+        self._validate_source(event)
+        self._validate_timestamps(event)
+        self._validate_schema_version(event)
 
-    event_id: UUID = Field(default_factory=uuid4)
+        return event
 
-    event_type: str
-    source: str
+    @staticmethod
+    def _validate_event_type(event: Event) -> None:
+        if not event.event_type.strip():
+            raise ValueError("Event type must not be empty")
 
-    source_event_id: str | None = None
-    dedupe_key: str | None = None
+    @staticmethod
+    def _validate_source(event: Event) -> None:
+        if not event.source.strip():
+            raise ValueError("Event source must not be empty")
 
-    occurred_at: datetime
-    received_at: datetime
+    @staticmethod
+    def _validate_timestamps(event: Event) -> None:
+        if event.occurred_at > event.received_at:
+            raise ValueError(
+                "Event occurred_at must not be later than received_at"
+            )
 
-    payload: dict[str, Any]
-
-    schema_version: int = 1
-
-    @field_validator("occurred_at", "received_at")
-    @classmethod
-    def validate_timezone(cls, value: datetime) -> datetime:
-        if value.tzinfo is None or value.utcoffset() is None:
-            raise ValueError("Event timestamps must be timezone-aware")
-
-        return value.astimezone(UTC)
+    @staticmethod
+    def _validate_schema_version(event: Event) -> None:
+        if event.schema_version < 1:
+            raise ValueError("Event schema_version must be >= 1")
