@@ -1,4 +1,4 @@
-from sqlalchemy import CheckConstraint, ForeignKey, Integer, String, Text
+from sqlalchemy import CheckConstraint, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from . import Base
@@ -15,6 +15,12 @@ class OutboxORM(Base):
         CheckConstraint(
             "attempt_count >= 0",
             name="ck_outbox_attempt_count",
+        ),
+        Index(
+            "idx_outbox_pending",
+            "status",
+            "next_attempt_at",
+            "created_at",
         ),
     )
 

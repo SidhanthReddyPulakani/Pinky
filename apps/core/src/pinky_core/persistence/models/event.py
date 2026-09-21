@@ -43,12 +43,14 @@ class EventORM(Base):
         Text,
         nullable=False,
     )
+
     event_metadata: Mapped[str] = mapped_column(
         "metadata",
         Text,
         nullable=False,
         default="{}",
     )
+
     causation_id: Mapped[str | None] = mapped_column(
         Text,
         nullable=True,
@@ -89,4 +91,32 @@ Index(
     EventORM.dedupe_key,
     unique=True,
     sqlite_where=EventORM.dedupe_key.is_not(None),
+)
+
+Index(
+    "idx_events_type_seq",
+    EventORM.event_type,
+    EventORM.event_seq,
+)
+
+Index(
+    "idx_events_source_seq",
+    EventORM.source,
+    EventORM.event_seq,
+)
+
+Index(
+    "idx_events_correlation",
+    EventORM.correlation_id,
+)
+
+Index(
+    "idx_events_causation",
+    EventORM.causation_id,
+)
+
+Index(
+    "idx_events_source_event",
+    EventORM.source,
+    EventORM.source_event_id,
 )

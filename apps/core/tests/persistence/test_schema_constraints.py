@@ -13,7 +13,14 @@ def test_event_indexes():
     } == {
         "uq_events_source_event",
         "uq_events_source_dedupe",
+        "idx_events_source_seq",
+        "idx_events_source_event",
+        "idx_events_correlation",
+        "idx_events_causation",
+        "idx_events_type_seq",
+
     }
+
 
 
 def test_outbox_constraints():
