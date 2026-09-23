@@ -1,12 +1,13 @@
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import UUID
-from datetime import timezone
+
 from pinky_core.event.models import Event
 from pinky_core.persistence.models.event import EventORM
 
+
 def _serialize_datetime(value: datetime) -> str:
-    return value.astimezone(timezone.utc).isoformat()
+    return value.astimezone(UTC).isoformat()
 
 
 def event_to_orm(event: Event) -> EventORM:

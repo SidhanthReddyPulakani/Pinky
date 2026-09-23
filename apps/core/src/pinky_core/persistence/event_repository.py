@@ -5,9 +5,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from pinky_core.event.models import Event
 from pinky_core.event.repository import EventRepository
-from pinky_core.persistence.event_mapper import event_to_orm, orm_to_event
-from pinky_core.persistence.models.event import EventORM
+from pinky_core.persistence.event_mapper import orm_to_event
 from pinky_core.persistence.event_record import StoredEvent
+from pinky_core.persistence.models.event import EventORM
+
 
 class SQLiteEventRepository(EventRepository):
     def __init__(

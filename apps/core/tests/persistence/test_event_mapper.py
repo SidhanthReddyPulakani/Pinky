@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from pinky_core.event.models import Event
@@ -14,10 +14,10 @@ def make_event() -> Event:
         event_type="FILE_CHANGED",
         source="filesystem",
         occurred_at=datetime(
-            2026, 9, 17, 10, 30, tzinfo=timezone.utc
+            2026, 9, 17, 10, 30, tzinfo=UTC
         ),
         received_at=datetime(
-            2026, 9, 17, 10, 31, tzinfo=timezone.utc
+            2026, 9, 17, 10, 31, tzinfo=UTC
         ),
         payload={"path": "/tmp/test.txt", "size": 42},
         event_metadata={"reader": "filesystem-reader"},

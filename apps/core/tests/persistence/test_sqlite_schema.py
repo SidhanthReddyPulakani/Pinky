@@ -1,11 +1,8 @@
-from sqlalchemy import inspect, text
-import pytest
-from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError
-
 from pathlib import Path
 
 import pytest
+from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 
 from pinky_core.persistence.database import (
     create_engine,

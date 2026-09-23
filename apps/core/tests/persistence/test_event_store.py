@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -27,7 +27,7 @@ def make_event() -> Event:
             17,
             10,
             30,
-            tzinfo=timezone.utc,
+            tzinfo=UTC,
         ),
         received_at=datetime(
             2026,
@@ -35,7 +35,7 @@ def make_event() -> Event:
             17,
             10,
             31,
-            tzinfo=timezone.utc,
+            tzinfo=UTC,
         ),
         payload={"path": "/tmp/test.txt"},
         event_metadata={"reader": "filesystem"},

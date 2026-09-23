@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -24,7 +24,7 @@ class EventStore:
         outbox_row = OutboxORM(
             outbox_id=str(uuid4()),
             event_id=str(event.event_id),
-            created_at=self._clock().astimezone(timezone.utc).isoformat(),
+            created_at=self._clock().astimezone(UTC).isoformat(),
             status="PENDING",
         )
 
@@ -35,4 +35,4 @@ class EventStore:
 
     @staticmethod
     def _utc_now() -> datetime:
-        return datetime.now(timezone.utc)
+        return datetime.now(UTC)
