@@ -42,3 +42,40 @@ class OutboxRepository:
             )
 
             return list(result.scalars().all())
+        
+    async def mark_published(
+        self,
+        *,
+        outbox_id: str,
+        published_at: str,
+    ) -> None:
+        async with self._session_factory() as session:
+            async with session.begin():
+                row = await session.get(OutboxORM, outbox_id)
+
+                if row is None:
+                    raise ValueError(f"Outbox entry not found: {outbox_id}")
+
+                row.status = "PUBLISHED"
+                row.published_at = published_at
+
+    async def record_failure(
+        self,
+        *,
+        outbox_id: str,
+        attempt_count: int,
+        last_attempt_at: str,
+        next_attempt_at: str | None,
+        last_error: str,
+    ) -> None:
+        async with self._session_factory() as session:
+            async with session.begin():
+                row = await session.get(OutboxORM, outbox_id)
+
+                if row is None:
+                    raise ValueError(f"Outbox entry not found: {outbox_id}")
+
+                row.attempt_count = attempt_count
+                row.last_attempt_at = last_attempt_at
+                row.next_attempt_at = next_attempt_at
+                row.last_error = last_error

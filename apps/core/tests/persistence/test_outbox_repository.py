@@ -175,3 +175,66 @@ async def test_outbox_has_foreign_key_to_event(
         row = result.scalar_one()
 
     assert row.event_id == str(event.event_id)
+
+@pytest.mark.asyncio
+async def test_mark_published_updates_outbox_row(
+    repositories,
+):
+    outbox_repository, event_store = repositories
+
+    event = make_event()
+    await event_store.append(event)
+
+    rows = await outbox_repository.get_pending()
+    assert len(rows) == 1
+
+    outbox_id = rows[0].outbox_id
+    published_at = "2026-09-23T10:00:00+00:00"
+
+    await outbox_repository.mark_published(
+        outbox_id=outbox_id,
+        published_at=published_at,
+    )
+
+    pending = await outbox_repository.get_pending()
+    assert pending == []
+
+    async with repositories[1]._session_factory() as session:
+        row = await session.get(OutboxORM, outbox_id)
+
+    assert row is not None
+    assert row.status == "PUBLISHED"
+    assert row.published_at == published_at
+
+
+@pytest.mark.asyncio
+async def test_record_failure_updates_retry_metadata(
+    repositories,
+):
+    outbox_repository, event_store = repositories
+
+    event = make_event()
+    await event_store.append(event)
+
+    rows = await outbox_repository.get_pending()
+    assert len(rows) == 1
+
+    outbox_id = rows[0].outbox_id
+
+    await outbox_repository.record_failure(
+        outbox_id=outbox_id,
+        attempt_count=1,
+        last_attempt_at="2026-09-23T10:00:00+00:00",
+        next_attempt_at="2026-09-23T10:01:00+00:00",
+        last_error="delivery failed",
+    )
+
+    async with event_store._session_factory() as session:
+        row = await session.get(OutboxORM, outbox_id)
+
+    assert row is not None
+    assert row.status == "PENDING"
+    assert row.attempt_count == 1
+    assert row.last_attempt_at == "2026-09-23T10:00:00+00:00"
+    assert row.next_attempt_at == "2026-09-23T10:01:00+00:00"
+    assert row.last_error == "delivery failed"
