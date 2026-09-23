@@ -16,13 +16,6 @@ class SQLiteEventRepository(EventRepository):
     ) -> None:
         self._session_factory = session_factory
 
-    async def append(self, event: Event) -> None:
-        row = event_to_orm(event)
-
-        async with self._session_factory() as session:
-            async with session.begin():
-                session.add(row)
-
     async def get(self, event_id: UUID) -> Event | None:
         async with self._session_factory() as session:
             result = await session.execute(

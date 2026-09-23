@@ -4,11 +4,8 @@ from uuid import UUID
 from pinky_core.event.models import Event
 from pinky_core.persistence.event_record import StoredEvent
 
-class EventRepository(ABC):
-    @abstractmethod
-    async def append(self, event: Event) -> None:
-        ...
 
+class EventRepository(ABC):
     @abstractmethod
     async def get(self, event_id: UUID) -> Event | None:
         ...
