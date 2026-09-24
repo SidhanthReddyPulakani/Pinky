@@ -6,3 +6,6 @@ __pycache__/
 .mypy_cache/
 pinky_core.egg-info/
 planning/archive/
+OAuth.json
+~
+credentials.json
