@@ -23,9 +23,7 @@ class EventValidation:
     @staticmethod
     def _validate_timestamps(event: Event) -> None:
         if event.occurred_at > event.received_at:
-            raise ValueError(
-                "Event occurred_at must not be later than received_at"
-            )
+            raise ValueError("Event occurred_at must not be later than received_at")
 
     @staticmethod
     def _validate_schema_version(event: Event) -> None:

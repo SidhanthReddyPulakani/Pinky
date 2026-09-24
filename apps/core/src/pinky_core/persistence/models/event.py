@@ -1,7 +1,7 @@
 from sqlalchemy import Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from . import Base
+from .base import Base
 
 
 class EventORM(Base):

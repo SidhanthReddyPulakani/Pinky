@@ -20,9 +20,7 @@ class SQLiteEventRepository(EventRepository):
     async def get(self, event_id: UUID) -> Event | None:
         async with self._session_factory() as session:
             result = await session.execute(
-                select(EventORM).where(
-                    EventORM.event_id == str(event_id)
-                )
+                select(EventORM).where(EventORM.event_id == str(event_id))
             )
 
             row = result.scalar_one_or_none()

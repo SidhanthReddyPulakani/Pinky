@@ -1,13 +1,13 @@
 from datetime import UTC, datetime
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 from pinky_core.event.intake import EventIntake
 from pinky_core.event.intake_result import Accepted, Duplicate, Rejected
 from pinky_core.event.models import Event, IncomingEvent
 from pinky_core.event.validation import EventValidation
 
-from sqlalchemy.exc import IntegrityError
 
 class FailingEventStore:
     async def append(self, event):
@@ -16,6 +16,8 @@ class FailingEventStore:
             {},
             Exception("duplicate"),
         )
+
+
 class StubRepository:
     def __init__(self, existing_event=None):
         self.existing_event = existing_event
@@ -102,6 +104,7 @@ async def test_validation_failure_returns_rejected():
     assert result.reason
     assert event_store.appended == []
 
+
 @pytest.mark.asyncio
 async def test_integrity_error_returns_duplicate_when_existing_event_is_found():
     existing_event = Event.from_incoming(
@@ -119,6 +122,7 @@ async def test_integrity_error_returns_duplicate_when_existing_event_is_found():
 
     assert isinstance(result, Duplicate)
     assert result.existing_event == existing_event
+
 
 @pytest.mark.asyncio
 async def test_unrelated_integrity_error_is_reraised():

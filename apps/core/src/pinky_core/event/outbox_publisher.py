@@ -1,8 +1,7 @@
-from collections.abc import Callable, Awaitable
-from datetime import datetime, timezone
+from collections.abc import Callable
+from datetime import UTC, datetime
 
 from pinky_core.event.delivery import DeliveryTarget
-from pinky_core.event.models import Event
 from pinky_core.persistence.event_repository import SQLiteEventRepository
 from pinky_core.persistence.outbox_repository import OutboxRepository
 
@@ -56,4 +55,4 @@ class OutboxPublisher:
 
     @staticmethod
     def _utc_now() -> datetime:
-        return datetime.now(timezone.utc)
+        return datetime.now(UTC)

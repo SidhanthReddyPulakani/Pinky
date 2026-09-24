@@ -67,27 +67,23 @@ async def test_append_persists_event_and_outbox(session_factory):
 
     async with session_factory() as session:
         event_row = await session.scalar(
-            select(EventORM).where(
-                EventORM.event_id == str(event.event_id)
-            )
+            select(EventORM).where(EventORM.event_id == str(event.event_id))
         )
 
         outbox_row = await session.scalar(
-            select(OutboxORM).where(
-                OutboxORM.event_id == str(event.event_id)
-            )
+            select(OutboxORM).where(OutboxORM.event_id == str(event.event_id))
         )
 
     assert event_row is not None
     assert outbox_row is not None
     assert outbox_row.status == "PENDING"
 
+
 @pytest.mark.asyncio
 async def test_append_is_atomic_when_outbox_insert_fails(
     session_factory,
 ):
     event = make_event()
-    store = EventStore(session_factory)
 
     async with session_factory() as session:
         async with session.begin():
@@ -140,15 +136,11 @@ async def test_append_is_atomic_when_outbox_insert_fails(
 
     async with session_factory() as session:
         event_row = await session.scalar(
-            select(EventORM).where(
-                EventORM.event_id == str(event.event_id)
-            )
+            select(EventORM).where(EventORM.event_id == str(event.event_id))
         )
 
         outbox_row = await session.scalar(
-            select(OutboxORM).where(
-                OutboxORM.event_id == str(event.event_id)
-            )
+            select(OutboxORM).where(OutboxORM.event_id == str(event.event_id))
         )
 
     assert event_row is None

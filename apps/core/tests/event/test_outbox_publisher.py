@@ -1,4 +1,5 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from uuid import uuid4
 
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -9,7 +10,7 @@ from pinky_core.persistence.event_repository import SQLiteEventRepository
 from pinky_core.persistence.event_store import EventStore
 from pinky_core.persistence.models import Base
 from pinky_core.persistence.outbox_repository import OutboxRepository
-from uuid import uuid4
+
 
 @pytest.fixture
 async def repositories():
@@ -31,7 +32,7 @@ async def repositories():
 
 
 def make_event() -> Event:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     return Event(
         event_id=uuid4(),
@@ -43,6 +44,7 @@ def make_event() -> Event:
         event_metadata={},
         schema_version=1,
     )
+
 
 @pytest.mark.asyncio
 async def test_publish_pending_marks_successful_delivery_published(
@@ -68,6 +70,7 @@ async def test_publish_pending_marks_successful_delivery_published(
 
     assert delivered == [event]
     assert await outbox_repository.get_pending() == []
+
 
 @pytest.mark.asyncio
 async def test_publish_pending_keeps_failed_delivery_pending(
@@ -101,6 +104,7 @@ async def test_publish_pending_keeps_failed_delivery_pending(
     assert pending[0].last_attempt_at is not None
     assert pending[0].next_attempt_at is None
     assert pending[0].last_error == "delivery failed"
+
 
 @pytest.mark.asyncio
 async def test_pending_outbox_is_republished_by_new_publisher(

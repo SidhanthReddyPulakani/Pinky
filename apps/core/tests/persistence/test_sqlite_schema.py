@@ -24,7 +24,8 @@ async def session_factory(tmp_path: Path):
     yield factory
 
     await engine.dispose()
-    
+
+
 @pytest.mark.asyncio
 async def test_outbox_rejects_invalid_status(session_factory):
     async with session_factory() as session:
@@ -51,17 +52,13 @@ async def test_outbox_rejects_invalid_status(session_factory):
             )
             await session.commit()
 
+
 async def test_sqlite_event_indexes_and_outbox_constraints(
     session_factory,
 ):
     async with session_factory() as session:
-        indexes = await session.execute(
-            text("PRAGMA index_list('events')")
-        )
-        index_names = {
-            row[1]
-            for row in indexes.fetchall()
-        }
+        indexes = await session.execute(text("PRAGMA index_list('events')"))
+        index_names = {row[1] for row in indexes.fetchall()}
 
         assert "uq_events_source_event" in index_names
         assert "uq_events_source_dedupe" in index_names

@@ -7,10 +7,7 @@ from pinky_core.persistence.models.outbox import OutboxORM
 def test_event_indexes():
     indexes = inspect(EventORM).local_table.indexes
 
-    assert {
-        index.name
-        for index in indexes
-    } == {
+    assert {index.name for index in indexes} == {
         "uq_events_source_event",
         "uq_events_source_dedupe",
         "idx_events_source_seq",
@@ -18,9 +15,7 @@ def test_event_indexes():
         "idx_events_correlation",
         "idx_events_causation",
         "idx_events_type_seq",
-
     }
-
 
 
 def test_outbox_constraints():

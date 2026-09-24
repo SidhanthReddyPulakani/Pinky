@@ -161,20 +161,17 @@ async def test_outbox_has_foreign_key_to_event(
     event = make_event()
 
     event_store = EventStore(session_factory)
-    repository = OutboxRepository(session_factory)
-
     await event_store.append(event)
 
     async with session_factory() as session:
         result = await session.execute(
-            select(OutboxORM).where(
-                OutboxORM.event_id == str(event.event_id)
-            )
+            select(OutboxORM).where(OutboxORM.event_id == str(event.event_id))
         )
 
         row = result.scalar_one()
 
     assert row.event_id == str(event.event_id)
+
 
 @pytest.mark.asyncio
 async def test_mark_published_updates_outbox_row(

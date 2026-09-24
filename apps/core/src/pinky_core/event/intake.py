@@ -1,5 +1,8 @@
 from collections.abc import Callable
 from datetime import UTC, datetime
+
+from sqlalchemy.exc import IntegrityError
+
 from pinky_core.event.intake_result import (
     Accepted,
     Duplicate,
@@ -10,7 +13,7 @@ from pinky_core.event.models import Event, IncomingEvent
 from pinky_core.event.repository import EventRepository
 from pinky_core.event.validation import EventValidation
 from pinky_core.persistence.event_store import EventStore
-from sqlalchemy.exc import IntegrityError
+
 
 class EventIntake:
     """
@@ -86,7 +89,7 @@ class EventIntake:
             raise
 
         return Accepted(event)
-    
+
     @staticmethod
     def _utc_now() -> datetime:
         return datetime.now(UTC)

@@ -1,8 +1,8 @@
+import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-import asyncio
 
 from pinky_core.event.intake import EventIntake
 from pinky_core.event.intake_result import Accepted, Duplicate, Rejected
@@ -16,6 +16,7 @@ from pinky_core.persistence.event_repository import SQLiteEventRepository
 from pinky_core.persistence.event_store import EventStore
 from pinky_core.persistence.models import Base
 from pinky_core.persistence.models.outbox import OutboxORM
+
 
 class CoordinatedRepository(SQLiteEventRepository):
     def __init__(self, session_factory, ready, release):
@@ -38,6 +39,7 @@ class CoordinatedRepository(SQLiteEventRepository):
         await self._release.wait()
 
         return result
+
 
 @pytest.mark.asyncio
 async def test_concurrent_duplicate_intake(
@@ -70,12 +72,8 @@ async def test_concurrent_duplicate_intake(
         payload={"path": "/tmp/concurrent.txt"},
     )
 
-    task1 = asyncio.create_task(
-        intake.accept(incoming)
-    )
-    task2 = asyncio.create_task(
-        intake.accept(incoming)
-    )
+    task1 = asyncio.create_task(intake.accept(incoming))
+    task2 = asyncio.create_task(intake.accept(incoming))
 
     await asyncio.wait_for(
         ready.wait(),
@@ -89,25 +87,16 @@ async def test_concurrent_duplicate_intake(
         timeout=5,
     )
 
-    accepted = [
-        result
-        for result in results
-        if isinstance(result, Accepted)
-    ]
+    accepted = [result for result in results if isinstance(result, Accepted)]
 
-    duplicates = [
-        result
-        for result in results
-        if isinstance(result, Duplicate)
-    ]
+    duplicates = [result for result in results if isinstance(result, Duplicate)]
 
     assert len(accepted) == 1
     assert len(duplicates) == 1
 
-    assert (
-        accepted[0].event.event_id
-        == duplicates[0].existing_event.event_id
-    )
+    assert accepted[0].event.event_id == duplicates[0].existing_event.event_id
+
+
 @pytest.fixture
 async def session_factory(tmp_path: Path):
     database_path = tmp_path / "test.db"
@@ -244,13 +233,9 @@ async def test_event_flows_from_intake_to_persistence(
 
         from pinky_core.persistence.models.event import EventORM
 
-        event_count = await session.scalar(
-            select(func.count()).select_from(EventORM)
-        )
+        event_count = await session.scalar(select(func.count()).select_from(EventORM))
 
-        outbox_count = await session.scalar(
-            select(func.count()).select_from(OutboxORM)
-        )
+        outbox_count = await session.scalar(select(func.count()).select_from(OutboxORM))
 
     assert event_count == 1
     assert outbox_count == 1
@@ -288,16 +273,13 @@ async def test_duplicate_intake_returns_duplicate_without_second_persistence(
 
         from pinky_core.persistence.models.event import EventORM
 
-        event_count = await session.scalar(
-            select(func.count()).select_from(EventORM)
-        )
+        event_count = await session.scalar(select(func.count()).select_from(EventORM))
 
-        outbox_count = await session.scalar(
-            select(func.count()).select_from(OutboxORM)
-        )
+        outbox_count = await session.scalar(select(func.count()).select_from(OutboxORM))
 
     assert event_count == 1
     assert outbox_count == 1
+
 
 @pytest.mark.asyncio
 async def test_rejected_intake_does_not_persist_event(session_factory):

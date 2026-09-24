@@ -42,7 +42,7 @@ class OutboxRepository:
             )
 
             return list(result.scalars().all())
-        
+
     async def mark_published(
         self,
         *,

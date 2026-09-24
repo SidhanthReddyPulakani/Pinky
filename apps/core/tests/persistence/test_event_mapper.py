@@ -13,12 +13,8 @@ def make_event() -> Event:
         event_id=uuid4(),
         event_type="FILE_CHANGED",
         source="filesystem",
-        occurred_at=datetime(
-            2026, 9, 17, 10, 30, tzinfo=UTC
-        ),
-        received_at=datetime(
-            2026, 9, 17, 10, 31, tzinfo=UTC
-        ),
+        occurred_at=datetime(2026, 9, 17, 10, 30, tzinfo=UTC),
+        received_at=datetime(2026, 9, 17, 10, 31, tzinfo=UTC),
         payload={"path": "/tmp/test.txt", "size": 42},
         event_metadata={"reader": "filesystem-reader"},
         causation_id="cause-123",
