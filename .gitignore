@@ -9,3 +9,5 @@ planning/archive/
 OAuth.json
 ~
 credentials.json
+.pinky
+pinky.db
