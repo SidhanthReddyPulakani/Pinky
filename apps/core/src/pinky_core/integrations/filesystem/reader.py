@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -21,6 +22,29 @@ from pinky_core.event.intake import EventIntake
 from pinky_core.event.models import IncomingEvent
 from pinky_core.event.reader import EventReader
 
+_WINDOWS_PROTECTED_RELATIVE_ROOTS = (
+    "Windows",
+    "Program Files",
+    "Program Files (x86)",
+    "ProgramData",
+    "$Recycle.Bin",
+    "System Volume Information",
+    "Recovery",
+    "Config.Msi",
+    "Documents and Settings",
+    "New-Folder\\Pinky",
+    "Users\\sidha",
+)
+
+
+def _windows_protected_roots(root: Path) -> tuple[Path, ...]:
+    if os.name != "nt":
+        return ()
+
+    return tuple(
+        root / relative_path
+        for relative_path in _WINDOWS_PROTECTED_RELATIVE_ROOTS
+    )
 
 @dataclass(frozen=True)
 class _FilesystemChange:
@@ -47,6 +71,7 @@ class FilesystemReader(EventReader):
         self._intake = intake
         self._recursive = recursive
         self._queue_size = queue_size
+        self._ignored_roots = _windows_protected_roots(self._root)
 
         self._observer: Observer | None = None
         self._queue: asyncio.Queue[_FilesystemChange | None] | None = None
@@ -57,6 +82,7 @@ class FilesystemReader(EventReader):
         self._stop_lock = asyncio.Lock()
 
         self._logger = logging.getLogger(__name__)
+        
 
     async def run(self) -> None:
         if self._running:
@@ -80,6 +106,7 @@ class FilesystemReader(EventReader):
             queue=self._queue,
             on_fault=self._on_fault,
             logger=self._logger,
+            ignored_roots=self._ignored_roots,
         )
 
         observer = Observer()
@@ -173,7 +200,20 @@ class FilesystemReader(EventReader):
                 # The consumer will eventually observe _fault after
                 # processing the currently queued item.
                 pass
+            
+    def _is_ignored_path(self, path: Path) -> bool:
+        normalized = os.path.normcase(
+            os.path.abspath(os.fspath(path))
+        )
 
+        return any(
+            normalized == os.path.normcase(os.fspath(ignored_root))
+            or normalized.startswith(
+                os.path.normcase(os.fspath(ignored_root)) + os.sep
+            )
+            for ignored_root in self._ignored_roots
+        )
+    
     async def _consume(self) -> None:
         assert self._queue is not None
 
@@ -246,7 +286,7 @@ class FilesystemReader(EventReader):
 
         try:
             stat = source_path.stat()
-        except FileNotFoundError:
+        except (FileNotFoundError, PermissionError):
             return payload
 
         payload.update(
@@ -298,13 +338,28 @@ class _FilesystemEventHandler(FileSystemEventHandler):
         queue: asyncio.Queue[_FilesystemChange | None],
         on_fault: Any,
         logger: logging.Logger,
+        ignored_roots: tuple[Path, ...] = (),
     ) -> None:
         self._root = root
         self._loop = loop
         self._queue = queue
         self._on_fault = on_fault
         self._logger = logger
+        self._ignored_roots = ignored_roots
 
+    def _is_ignored_path(self, path: Path) -> bool:
+        normalized = os.path.normcase(
+            os.path.abspath(os.fspath(path))
+        )
+
+        return any(
+            normalized == os.path.normcase(os.fspath(ignored_root))
+            or normalized.startswith(
+                os.path.normcase(os.fspath(ignored_root)) + os.sep
+            )
+            for ignored_root in self._ignored_roots
+        )
+    
     def on_created(self, event: FileSystemEvent) -> None:
         if isinstance(event, FileCreatedEvent):
             self._enqueue(
@@ -343,6 +398,28 @@ class _FilesystemEventHandler(FileSystemEventHandler):
             )
 
     def _enqueue(self, change: _FilesystemChange) -> None:
+        if self._is_ignored_path(change.source_path):
+            self._logger.debug(
+                "Filesystem event ignored protected path "
+                "type=%s path=%s",
+                change.event_type,
+                change.source_path,
+            )
+            return
+
+        if (
+            change.destination_path is not None
+            and self._is_ignored_path(change.destination_path)
+        ):
+            self._logger.debug(
+                "Filesystem event ignored protected destination "
+                "type=%s path=%s destination=%s",
+                change.event_type,
+                change.source_path,
+                change.destination_path,
+            )
+            return
+        
         def enqueue() -> None:
             try:
                 self._queue.put_nowait(change)
