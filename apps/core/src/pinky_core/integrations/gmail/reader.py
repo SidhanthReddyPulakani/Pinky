@@ -5,7 +5,7 @@ import logging
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any
-from venv import logger
+from googleapiclient.errors import HttpError
 
 from pinky_core.event.intake import EventIntake
 from pinky_core.event.intake_result import Accepted, Rejected
@@ -104,11 +104,24 @@ class GmailReader:
         )
 
         for message_id in unique_message_ids:
-            message = self._client.get_message(
-                message_id=message_id,
-            )
+            try:
+                message = self._client.get_message(
+                    message_id=message_id,
+                )
+            except HttpError as exc:
+                if exc.resp.status == 404:
+                    self._logger.warning(
+                        "Gmail message no longer available; skipping "
+                        "stale history record account=%s message_id=%s",
+                        self._account_id,
+                        message_id,
+                    )
+                    continue
+
+                raise
 
             event = self._to_event(message)
+
             result = await self._intake.accept(event)
 
             if isinstance(result, Rejected):
