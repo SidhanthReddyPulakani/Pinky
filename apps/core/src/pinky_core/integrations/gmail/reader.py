@@ -32,7 +32,8 @@ class GmailReader:
         self._checkpoint_store = checkpoint_store
         self._account_id = account_id
         self._poll_interval_seconds = poll_interval_seconds
-
+        self._retry_initial_delay_seconds = 1.0
+        self._retry_max_delay_seconds = 60.0
         self._running = False
         self._stop_event = asyncio.Event()
 
@@ -45,24 +46,58 @@ class GmailReader:
         self._running = True
         self._stop_event.clear()
 
+        retry_delay = self._retry_initial_delay_seconds
+
         try:
             self._logger.info(
                 "Gmail reader started for account=%s",
                 self._account_id,
             )
-            await self._poll_once()
 
             while not self._stop_event.is_set():
+                try:
+                    await self._poll_once()
+
+                    # A successful poll resets the retry backoff.
+                    retry_delay = self._retry_initial_delay_seconds
+
+                except HttpError as exc:
+                    if not self._is_retryable_error(exc):
+                        raise
+
+                    self._logger.warning(
+                        "Transient Gmail error; retrying account=%s "
+                        "status=%s delay=%.1fs",
+                        self._account_id,
+                        exc.resp.status,
+                        retry_delay,
+                    )
+
+                    try:
+                        await asyncio.wait_for(
+                            self._stop_event.wait(),
+                            timeout=retry_delay,
+                        )
+                    except asyncio.TimeoutError:
+                        pass
+
+                    retry_delay = min(
+                        retry_delay * 2,
+                        self._retry_max_delay_seconds,
+                    )
+
+                    continue
+
                 try:
                     await asyncio.wait_for(
                         self._stop_event.wait(),
                         timeout=self._poll_interval_seconds,
                     )
                 except asyncio.TimeoutError:
-                    await self._poll_once()
-        finally:
-            self._running = False
+                    pass
 
+        finally:
+            self._running = False    
     async def stop(self) -> None:
         self._stop_event.set()
 
@@ -70,7 +105,9 @@ class GmailReader:
             "Gmail reader stop requested for account=%s",
             self._account_id,
         )
-
+    @staticmethod
+    def _is_retryable_error(exc: HttpError) -> bool:
+        return exc.resp.status in {429, 500, 502, 503, 504}
     async def _poll_once(self) -> None:
         checkpoint = self._checkpoint_store.load()
 

@@ -12,7 +12,8 @@ from pinky_core.integrations.gmail.checkpoint import (
     GmailCheckpointStore,
 )
 from pinky_core.integrations.gmail.reader import GmailReader
-
+from googleapiclient.errors import HttpError
+from httplib2 import Response
 
 class StubGmailClient:
     def __init__(
@@ -155,7 +156,27 @@ def make_reader(
         account_id="account-a",
         poll_interval_seconds=0,
     )
+def make_http_error(status: int) -> HttpError:
+    return HttpError(
+        Response({"status": str(status)}),
+        b'{"error": {"message": "test error"}}',
+    )
+def make_run_reader(tmp_path: Path) -> GmailReader:
+    client = StubGmailClient()
 
+    repository = StubRepository()
+    event_store = StubEventStore(repository)
+    intake = make_intake(repository, event_store)
+
+    checkpoint_store = GmailCheckpointStore(
+        path=tmp_path / "checkpoint",
+    )
+
+    return make_reader(
+        client=client,
+        intake=intake,
+        checkpoint_store=checkpoint_store,
+    )
 
 @pytest.mark.asyncio
 async def test_first_poll_establishes_checkpoint_without_emitting(
@@ -408,3 +429,100 @@ async def test_checkpoint_does_not_advance_if_message_processing_fails(
     assert checkpoint_store.load() == GmailCheckpoint(
         history_id="101",
     )
+
+@pytest.mark.asyncio
+async def test_checkpoint_does_not_advance_if_event_is_rejected(
+    tmp_path: Path,
+) -> None:
+    client = StubGmailClient(
+        history_message_ids=["message-1"],
+        newest_history_id="101",
+        messages={
+            "message-1": make_message(),
+        },
+    )
+
+    repository = StubRepository()
+    event_store = StubEventStore(repository)
+
+    class RejectingIntake:
+        async def accept(self, event):
+            from pinky_core.event.intake_result import Rejected
+
+            return Rejected(
+                reason="test rejection",
+            )
+
+    intake = RejectingIntake()
+
+    checkpoint_store = GmailCheckpointStore(
+        path=tmp_path / "checkpoint",
+    )
+    checkpoint_store.save(
+        GmailCheckpoint(history_id="100"),
+    )
+
+    reader = make_reader(
+        client=client,
+        intake=intake,
+        checkpoint_store=checkpoint_store,
+    )
+
+    await reader._poll_once()
+
+    assert len(event_store.events) == 0
+    assert checkpoint_store.load() == GmailCheckpoint(
+        history_id="100",
+    )
+
+@pytest.mark.asyncio
+async def test_run_retries_transient_http_error(
+    tmp_path: Path,
+) -> None:
+    reader = make_run_reader(tmp_path)
+
+    reader._retry_initial_delay_seconds = 0.01
+    reader._retry_max_delay_seconds = 0.01
+
+    poll_results = [
+        make_http_error(503),
+        None,
+    ]
+
+    async def fake_poll_once() -> None:
+        result = poll_results.pop(0)
+
+        if result is not None:
+            raise result
+
+        reader._stop_event.set()
+
+    reader._poll_once = fake_poll_once  # type: ignore[method-assign]
+
+    await reader.run()
+
+    assert poll_results == []
+@pytest.mark.asyncio
+async def test_run_does_not_retry_non_retryable_http_error(
+    tmp_path: Path,
+) -> None:
+    reader = make_run_reader(tmp_path)
+
+    error = make_http_error(401)
+
+    async def fake_poll_once() -> None:
+        raise error
+
+    reader._poll_once = fake_poll_once  # type: ignore[method-assign]
+
+    with pytest.raises(HttpError):
+        await reader.run()
+@pytest.mark.parametrize(
+    "status",
+    [429, 500, 502, 503, 504],
+)
+def test_retryable_http_statuses(status: int) -> None:
+    error = make_http_error(status)
+
+    assert GmailReader._is_retryable_error(error) is True
+
